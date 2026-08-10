@@ -43,7 +43,32 @@ public:
      */
     const FNiumaSpatialContainerState& GetState() const;
 
+    /**
+    * 查询指定逻辑格保存的 Placement 下标。
+    * 返回 true 表示查询成功：
+    * - OutPlacementIndex == INDEX_NONE：该格为空
+    * - 其他值：对应 State.Placements 中的下标
+    * 返回 false 表示容器未初始化、坐标越界或内部缓存异常。
+    * 失败时不修改 OutPlacementIndex。
+    */
+    bool TryGetPlacementIndexAt(
+        const FIntPoint& Cell,
+        int32& OutPlacementIndex,
+        FString* OutError = nullptr) const;
+
 private:
+    /**
+    * 判断逻辑格是否位于当前容器范围内。
+    */
+    bool IsCellInBounds(const FIntPoint& Cell) const;
+
+    /**
+    * 把合法的二维坐标转换为 OccupancyCache 下标。
+    *
+    * 调用者必须先保证 Cell 位于容器范围内。
+    */
+    int32 ToFlatIndexUnchecked(const FIntPoint& Cell) const;
+
     /**
      * 当前容器使用的不可随意修改规则。
      */
