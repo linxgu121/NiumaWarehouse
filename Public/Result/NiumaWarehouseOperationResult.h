@@ -41,5 +41,7 @@ enum class ENiumaWarehouseOperationResult : uint8
 
 	ItemNotFound = 130 UMETA(DisplayName = "容器中找不到该物品"),
 
+	ItemAlreadyExists = 140 UMETA(DisplayName = "物品实例已存在于容器中"),
+
 	InternalError = 250 UMETA(DisplayName = "容器内部状态异常")
 };

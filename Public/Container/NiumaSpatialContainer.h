@@ -69,6 +69,19 @@ public:
         const INiumaItemSpatialDefinitionResolver& Resolver,
         FString* OutError = nullptr) const;
 
+    /**
+    * 把一条合法 Placement 原子提交到容器。
+    * 成功时：
+    * - Placements 增加一条记录
+    * - Footprint 对应格写入新 Placement 下标
+    * - Revision 只增加一次
+    * 失败时容器保持原样。
+    */
+    ENiumaWarehouseOperationResult TryPlace(
+        const FNiumaSpatialItemPlacement& Placement,
+        const INiumaItemSpatialDefinitionResolver& Resolver,
+        FString* OutError = nullptr);
+
 private:
     /**
     * 判断逻辑格是否位于当前容器范围内。
@@ -105,4 +118,22 @@ private:
     */
     bool bInitialized = false;
 
+    /**
+    * 执行完整放置评估。
+    * OutResolvedData 为 nullptr 时只进行判定；
+    * 非 nullptr 时仅在成功后输出本次解析的空间数据。
+    * 失败时不修改 OutResolvedData。
+    */
+    ENiumaWarehouseOperationResult EvaluatePlacement(
+        const FNiumaSpatialItemPlacement& Placement,
+        const INiumaItemSpatialDefinitionResolver& Resolver,
+        FNiumaResolvedItemSpatialData* OutResolvedData,
+        FString* OutError) const;
+
+    /**
+    * 根据 InstanceId 查询 Placement 下标。
+    *
+    * 找不到时返回 INDEX_NONE。
+    */
+    int32 FindPlacementIndexByInstanceId(const FGuid& InstanceId) const;
 };

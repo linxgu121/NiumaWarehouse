@@ -155,10 +155,23 @@ const FNiumaSpatialContainerState& FNiumaSpatialContainer::GetState() const
     return State;
 }
 
+//事务边界说明
+//EvaluatePlacement 成功
+//↓
+//复制 CandidateState
+//复制 CandidateOccupancy
+//↓
+//向候选 State 添加 Placement
+//向候选 Occupancy 写入全部 Footprint
+//Revision + 1
+//验证候选 State
+//↓
+//一次性替换正式 State 与 Occupancy
 
-ENiumaWarehouseOperationResult FNiumaSpatialContainer::CanPlace(
+ENiumaWarehouseOperationResult FNiumaSpatialContainer::EvaluatePlacement(
     const FNiumaSpatialItemPlacement& Placement,
     const INiumaItemSpatialDefinitionResolver& Resolver,
+    FNiumaResolvedItemSpatialData* OutResolvedData,
     FString* OutError) const
 {
     /*
@@ -337,6 +350,154 @@ ENiumaWarehouseOperationResult FNiumaSpatialContainer::CanPlace(
             return ENiumaWarehouseOperationResult::Occupied;
         }
     }
+
+    // 只有全部规则通过后，才提交可选输出。
+    if (OutResolvedData != nullptr)
+    {
+        *OutResolvedData = MoveTemp(ResolvedData);
+    }
+
+    if (OutError != nullptr)
+    {
+        OutError->Reset();
+    }
+
+    return ENiumaWarehouseOperationResult::Success;
+}
+
+ENiumaWarehouseOperationResult FNiumaSpatialContainer::CanPlace(
+    const FNiumaSpatialItemPlacement& Placement,
+    const INiumaItemSpatialDefinitionResolver& Resolver,
+    FString* OutError) const
+{
+    return EvaluatePlacement(Placement,Resolver,nullptr,OutError);
+}
+
+int32 FNiumaSpatialContainer::FindPlacementIndexByInstanceId(
+    const FGuid& InstanceId) const
+{
+    for (int32 Index = 0;
+        Index < State.Placements.Num();
+        ++Index)
+    {
+        if (State.Placements[Index].Item.InstanceId ==
+            InstanceId)
+        {
+            return Index;
+        }
+    }
+
+    return INDEX_NONE;
+}
+
+ENiumaWarehouseOperationResult FNiumaSpatialContainer::TryPlace(
+    const FNiumaSpatialItemPlacement& Placement,
+    const INiumaItemSpatialDefinitionResolver& Resolver,
+    FString* OutError)
+{
+    /*
+     * 只有结构合法的 Placement 才检查重复实例。
+     *
+     * 非法输入继续交给 EvaluatePlacement，
+     * 从而保持 InvalidCount、InvalidItem、
+     * InvalidPlacement 的原有错误优先级。
+     */
+    if (bInitialized && Placement.IsValid(nullptr) &&
+        FindPlacementIndexByInstanceId(Placement.Item.InstanceId) != INDEX_NONE)
+    {
+        SetSpatialContainerError(OutError,TEXT("该物品实例已经存在于容器中"));
+
+        return ENiumaWarehouseOperationResult::ItemAlreadyExists;
+    }
+
+    FNiumaResolvedItemSpatialData ResolvedData;
+
+    const ENiumaWarehouseOperationResult EvaluationResult =
+        EvaluatePlacement(Placement,Resolver,&ResolvedData,OutError);
+
+    if (EvaluationResult != ENiumaWarehouseOperationResult::Success)
+    {
+        return EvaluationResult;
+    }
+
+    if (State.Revision < 0 || State.Revision == MAX_int64)
+    {
+        SetSpatialContainerError(OutError,TEXT("容器 Revision 无法继续增加"));
+
+        return ENiumaWarehouseOperationResult::InternalError;
+    }
+
+    /*
+     * 从这里开始只修改候选副本。
+     * 任何 return 都不会影响正式容器。
+     */
+    FNiumaSpatialContainerState CandidateState = State;
+
+    TArray<int32> CandidateOccupancy = OccupancyCache;
+
+    const int32 NewPlacementIndex = CandidateState.Placements.Add(Placement);
+
+    for (const FIntPoint& LocalCell : ResolvedData.Footprint.Cells)
+    {
+        const int64 WorldX =
+            static_cast<int64>(Placement.Origin.X) +
+            static_cast<int64>(LocalCell.X);
+
+        const int64 WorldY =
+            static_cast<int64>(Placement.Origin.Y) +
+            static_cast<int64>(LocalCell.Y);
+
+        /*
+         * EvaluatePlacement 已经验证过边界，
+         * 这里使用同一份 ResolvedData 重建坐标。
+         */
+        const FIntPoint WorldCell(
+            static_cast<int32>(WorldX),
+            static_cast<int32>(WorldY));
+
+        const int32 FlatIndex = ToFlatIndexUnchecked(WorldCell);
+
+        if (!CandidateOccupancy.IsValidIndex(FlatIndex))
+        {
+            SetSpatialContainerError(OutError,TEXT("候选占用缓存与容器配置不一致"));
+
+            return ENiumaWarehouseOperationResult::InternalError;
+        }
+
+        /*
+         * EvaluatePlacement 已确认这些格为空。
+         * 再检查一次可以保护提交阶段的不变量。
+         */
+        if (CandidateOccupancy[FlatIndex] != INDEX_NONE)
+        {
+            SetSpatialContainerError(OutError,TEXT("候选占用缓存出现意外碰撞"));
+
+            return ENiumaWarehouseOperationResult::InternalError;
+        }
+
+        CandidateOccupancy[FlatIndex] = NewPlacementIndex;
+    }
+
+    ++CandidateState.Revision;
+
+    FString CandidateStateError;
+
+    if (!CandidateState.IsStructurallyValid(&CandidateStateError))
+    {
+        if (OutError != nullptr)
+        {
+            *OutError = FString::Printf(TEXT("候选容器状态无效：%s"), *CandidateStateError);
+        }
+
+        return ENiumaWarehouseOperationResult::InternalError;
+    }
+
+    /*
+     * 全部空间写入与状态验证成功后，
+     * 才一次性提交两个正式成员。
+     */
+    State = MoveTemp(CandidateState);
+    OccupancyCache = MoveTemp(CandidateOccupancy);
 
     if (OutError != nullptr)
     {
