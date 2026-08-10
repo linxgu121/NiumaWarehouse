@@ -4,6 +4,9 @@
 
 #include "NiumaWarehouse/Container/NiumaSpatialContainerConfig.h"
 #include "NiumaWarehouse/Container/NiumaSpatialContainerState.h"
+#include "NiumaWarehouse/Definitions/NiumaItemSpatialDefinitionResolver.h"
+#include "NiumaWarehouse/Result/NiumaWarehouseOperationResult.h"
+#include "NiumaWarehouse/Spatial/NiumaSpatialItemPlacement.h"
 
 /**
  * 通用二维空间容器核心。
@@ -54,6 +57,16 @@ public:
     bool TryGetPlacementIndexAt(
         const FIntPoint& Cell,
         int32& OutPlacementIndex,
+        FString* OutError = nullptr) const;
+
+    /**
+    * 判断一条 Placement 是否可以放入当前容器。
+    *
+    * 只进行验证和查询，不修改容器状态。
+    */
+    ENiumaWarehouseOperationResult CanPlace(
+        const FNiumaSpatialItemPlacement& Placement,
+        const INiumaItemSpatialDefinitionResolver& Resolver,
         FString* OutError = nullptr) const;
 
 private:
