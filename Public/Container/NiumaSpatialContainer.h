@@ -82,6 +82,42 @@ public:
         const INiumaItemSpatialDefinitionResolver& Resolver,
         FString* OutError = nullptr);
 
+    /**
+    * 根据 InstanceId 原子移除一条 Placement。
+    * 成功时：
+    * - 删除对应 Placement
+    * - 释放它占用的全部逻辑格
+    * - 修正后续 Placement 的缓存下标
+    * - Revision 只增加一次
+    * 失败时容器保持原样。
+    */
+    ENiumaWarehouseOperationResult TryRemove(const FGuid& InstanceId,FString* OutError = nullptr);
+
+    /**
+    * 把指定物品实例移动到新的二维原点。
+    * 方向和物品数据保持不变。
+    * 成功修改位置时 Revision 增加一次。
+    * 失败时保持原位置。
+    */
+    ENiumaWarehouseOperationResult TryMove(
+        const FGuid& InstanceId,
+        FIntPoint NewOrigin,
+        const INiumaItemSpatialDefinitionResolver& Resolver,
+        FString* OutError = nullptr);
+
+    /**
+     * 把指定物品实例旋转到目标方向。
+     *
+     * Origin 和物品实例数据保持不变。
+     * 成功修改方向时 Revision 增加一次。
+     * 失败时保持原方向和原占用。
+    */
+    ENiumaWarehouseOperationResult TryRotate(
+        const FGuid& InstanceId,
+        ENiumaItemOrientation NewOrientation,
+        const INiumaItemSpatialDefinitionResolver& Resolver,
+        FString* OutError = nullptr);
+
 private:
     /**
     * 判断逻辑格是否位于当前容器范围内。
@@ -120,13 +156,15 @@ private:
 
     /**
     * 执行完整放置评估。
-    * OutResolvedData 为 nullptr 时只进行判定；
-    * 非 nullptr 时仅在成功后输出本次解析的空间数据。
-    * 失败时不修改 OutResolvedData。
+    * IgnoredPlacementIndex：
+    * - INDEX_NONE：正常检测全部占用；
+    * - 合法下标：碰撞检测时忽略该 Placement。
+    * OutResolvedData 只在成功时写入。
     */
     ENiumaWarehouseOperationResult EvaluatePlacement(
         const FNiumaSpatialItemPlacement& Placement,
         const INiumaItemSpatialDefinitionResolver& Resolver,
+        int32 IgnoredPlacementIndex,
         FNiumaResolvedItemSpatialData* OutResolvedData,
         FString* OutError) const;
 
@@ -136,4 +174,15 @@ private:
     * 找不到时返回 INDEX_NONE。
     */
     int32 FindPlacementIndexByInstanceId(const FGuid& InstanceId) const;
+
+    /**
+    * 原子替换指定下标的 Placement。
+    * 用于复用移动和旋转的释放旧占用、
+    * 写入新占用及提交逻辑。
+    */
+    ENiumaWarehouseOperationResult TryReplacePlacementAt(
+        int32 PlacementIndex,
+        const FNiumaSpatialItemPlacement& CandidatePlacement,
+        const INiumaItemSpatialDefinitionResolver& Resolver,
+        FString* OutError);
 };

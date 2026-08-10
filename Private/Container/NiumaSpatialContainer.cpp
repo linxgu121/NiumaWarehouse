@@ -171,6 +171,7 @@ const FNiumaSpatialContainerState& FNiumaSpatialContainer::GetState() const
 ENiumaWarehouseOperationResult FNiumaSpatialContainer::EvaluatePlacement(
     const FNiumaSpatialItemPlacement& Placement,
     const INiumaItemSpatialDefinitionResolver& Resolver,
+    int32 IgnoredPlacementIndex,
     FNiumaResolvedItemSpatialData* OutResolvedData,
     FString* OutError) const
 {
@@ -192,6 +193,13 @@ ENiumaWarehouseOperationResult FNiumaSpatialContainer::EvaluatePlacement(
         SetSpatialContainerError(OutError,TEXT("空间容器尚未初始化"));
 
         return ENiumaWarehouseOperationResult::NotInitialized;
+    }
+
+    if (IgnoredPlacementIndex != INDEX_NONE && !State.Placements.IsValidIndex(IgnoredPlacementIndex))
+    {
+        SetSpatialContainerError(OutError,TEXT("待忽略的 Placement 下标无效"));
+
+        return ENiumaWarehouseOperationResult::InternalError;
     }
 
     // Count 单独返回 InvalidCount，
@@ -339,10 +347,14 @@ ENiumaWarehouseOperationResult FNiumaSpatialContainer::EvaluatePlacement(
                 return ENiumaWarehouseOperationResult::InternalError;
             }
 
+            if (OccupyingPlacementIndex == IgnoredPlacementIndex)
+            {
+                continue;
+            }
+
             if (OutError != nullptr)
             {
-                *OutError = FString::Printf(
-                    TEXT("目标逻辑格 (%d, %d)已被占用"),
+                *OutError = FString::Printf(TEXT("目标逻辑格 (%d, %d)已被占用"),
                     WorldCell.X,
                     WorldCell.Y);
             }
@@ -370,7 +382,7 @@ ENiumaWarehouseOperationResult FNiumaSpatialContainer::CanPlace(
     const INiumaItemSpatialDefinitionResolver& Resolver,
     FString* OutError) const
 {
-    return EvaluatePlacement(Placement,Resolver,nullptr,OutError);
+    return EvaluatePlacement(Placement,Resolver,INDEX_NONE,nullptr,OutError);
 }
 
 int32 FNiumaSpatialContainer::FindPlacementIndexByInstanceId(
@@ -413,7 +425,7 @@ ENiumaWarehouseOperationResult FNiumaSpatialContainer::TryPlace(
     FNiumaResolvedItemSpatialData ResolvedData;
 
     const ENiumaWarehouseOperationResult EvaluationResult =
-        EvaluatePlacement(Placement,Resolver,&ResolvedData,OutError);
+        EvaluatePlacement(Placement,Resolver,INDEX_NONE,&ResolvedData,OutError);
 
     if (EvaluationResult != ENiumaWarehouseOperationResult::Success)
     {
@@ -505,4 +517,408 @@ ENiumaWarehouseOperationResult FNiumaSpatialContainer::TryPlace(
     }
 
     return ENiumaWarehouseOperationResult::Success;
+}
+
+ENiumaWarehouseOperationResult FNiumaSpatialContainer::TryRemove(
+    const FGuid& InstanceId,
+    FString* OutError)
+{
+    if (!bInitialized)
+    {
+        SetSpatialContainerError(OutError,TEXT("空间容器尚未初始化"));
+
+        return ENiumaWarehouseOperationResult::NotInitialized;
+    }
+
+    if (!InstanceId.IsValid())
+    {
+        SetSpatialContainerError(OutError,TEXT("待移除的 InstanceId 无效"));
+
+        return ENiumaWarehouseOperationResult::InvalidItem;
+    }
+
+    const int32 RemovedPlacementIndex = FindPlacementIndexByInstanceId(InstanceId);
+
+    if (RemovedPlacementIndex == INDEX_NONE)
+    {
+        SetSpatialContainerError(OutError,TEXT("容器中找不到指定物品实例"));
+
+        return ENiumaWarehouseOperationResult::ItemNotFound;
+    }
+
+    if (State.Revision < 0 || State.Revision == MAX_int64)
+    {
+        SetSpatialContainerError(OutError,TEXT("容器 Revision 无法继续增加"));
+
+        return ENiumaWarehouseOperationResult::InternalError;
+    }
+
+    FNiumaSpatialContainerState CandidateState = State;
+
+    TArray<int32> CandidateOccupancy = OccupancyCache;
+
+    /*
+     * Occupancy 当前保存的是旧 Placements 下标。
+     *
+     * 删除下标 N 后：
+     * - 等于 N：属于被删除物品，释放为空格；
+     * - 大于 N：TArray 元素前移，下标减 1；
+     * - 小于 N：位置不变。
+     */
+    for (int32& OccupyingPlacementIndex : CandidateOccupancy)
+    {
+        if (OccupyingPlacementIndex == INDEX_NONE)
+        {
+            continue;
+        }
+
+        if (!State.Placements.IsValidIndex(OccupyingPlacementIndex))
+        {
+            SetSpatialContainerError(OutError,TEXT("占用缓存包含无效的Placement 下标"));
+
+            return ENiumaWarehouseOperationResult::InternalError;
+        }
+
+        if (OccupyingPlacementIndex == RemovedPlacementIndex)
+        {
+            OccupyingPlacementIndex = INDEX_NONE;
+        }
+        else if (OccupyingPlacementIndex > RemovedPlacementIndex)
+        {
+            --OccupyingPlacementIndex;
+        }
+    }
+
+    /*
+     * RemoveAt 保持剩余元素顺序，
+     * 后面的 Placement 会整体向前移动一位。
+     */
+    CandidateState.Placements.RemoveAt(RemovedPlacementIndex);
+
+    ++CandidateState.Revision;
+
+    FString CandidateStateError;
+
+    if (!CandidateState.IsStructurallyValid(&CandidateStateError))
+    {
+        if (OutError != nullptr)
+        {
+            *OutError = FString::Printf(
+                TEXT("候选容器状态无效：%s"),
+                *CandidateStateError);
+        }
+
+        return ENiumaWarehouseOperationResult::InternalError;
+    }
+
+    State = MoveTemp(CandidateState);
+    OccupancyCache = MoveTemp(CandidateOccupancy);
+
+    if (OutError != nullptr)
+    {
+        OutError->Reset();
+    }
+
+    return ENiumaWarehouseOperationResult::Success;
+}
+
+ENiumaWarehouseOperationResult FNiumaSpatialContainer::TryMove(
+    const FGuid& InstanceId,
+    FIntPoint NewOrigin,
+    const INiumaItemSpatialDefinitionResolver& Resolver,
+    FString* OutError)
+{
+    //移动事务过程
+    //找到原 Placement
+    //→ 构造只改变 Origin 的候选 Placement
+    //→ EvaluatePlacement 忽略自己的旧下标
+    //→ 复制 State 与 Occupancy
+    //→ 候选缓存释放旧占用
+    //→ 候选缓存写入新占用
+    //→ 替换候选 Placement
+    //→ Revision + 1
+    //→ 一次性提交
+    if (!bInitialized)
+    {
+        SetSpatialContainerError(OutError,TEXT("空间容器尚未初始化"));
+
+        return ENiumaWarehouseOperationResult::NotInitialized;
+    }
+
+    if (!InstanceId.IsValid())
+    {
+        SetSpatialContainerError(OutError,TEXT("待移动的 InstanceId 无效"));
+
+        return ENiumaWarehouseOperationResult::InvalidItem;
+    }
+
+    const int32 PlacementIndex = FindPlacementIndexByInstanceId(InstanceId);
+
+    if (PlacementIndex == INDEX_NONE)
+    {
+        SetSpatialContainerError(OutError,TEXT("容器中找不到待移动的物品实例"));
+
+        return ENiumaWarehouseOperationResult::ItemNotFound;
+    }
+
+    const FNiumaSpatialItemPlacement& ExistingPlacement = State.Placements[PlacementIndex];
+
+    /*
+     * 原点没有变化时属于成功的无操作，
+     * 不调用 Resolver，也不增加 Revision。
+     */
+    if (ExistingPlacement.Origin == NewOrigin)
+    {
+        if (OutError != nullptr)
+        {
+            OutError->Reset();
+        }
+
+        return ENiumaWarehouseOperationResult::Success;
+    }
+
+    FNiumaSpatialItemPlacement CandidatePlacement = ExistingPlacement;
+
+    CandidatePlacement.Origin = NewOrigin;
+
+    return TryReplacePlacementAt(
+        PlacementIndex,
+        CandidatePlacement,
+        Resolver,
+        OutError);
+}
+
+ENiumaWarehouseOperationResult FNiumaSpatialContainer::TryReplacePlacementAt(
+    int32 PlacementIndex,
+    const FNiumaSpatialItemPlacement& CandidatePlacement,
+    const INiumaItemSpatialDefinitionResolver& Resolver,
+    FString* OutError)
+{
+    if (!bInitialized)
+    {
+        SetSpatialContainerError(OutError,TEXT("空间容器尚未初始化"));
+
+        return ENiumaWarehouseOperationResult::NotInitialized;
+    }
+
+    if (!State.Placements.IsValidIndex(PlacementIndex))
+    {
+        SetSpatialContainerError(OutError,TEXT("待替换的 Placement 下标无效"));
+
+        return ENiumaWarehouseOperationResult::InternalError;
+    }
+
+    const FNiumaItemInstance& ExistingItem = State.Placements[PlacementIndex].Item;
+
+    const FNiumaItemInstance& CandidateItem = CandidatePlacement.Item;
+
+    /*
+     * 移动与旋转只能改变空间数据，
+     * 不能借替换操作修改物品实例。
+     */
+    const bool bSameItem =
+        ExistingItem.InstanceId ==
+        CandidateItem.InstanceId &&
+        ExistingItem.ItemDefinitionId ==
+        CandidateItem.ItemDefinitionId &&
+        ExistingItem.Count ==
+        CandidateItem.Count;
+
+    if (!bSameItem)
+    {
+        SetSpatialContainerError(OutError,TEXT("候选 Placement 修改了物品实例数据"));
+
+        return ENiumaWarehouseOperationResult::InternalError;
+    }
+
+    FNiumaResolvedItemSpatialData ResolvedData;
+
+    const ENiumaWarehouseOperationResult EvaluationResult =
+        EvaluatePlacement(
+            CandidatePlacement,
+            Resolver,
+            PlacementIndex,
+            &ResolvedData,
+            OutError);
+
+    if (EvaluationResult !=
+        ENiumaWarehouseOperationResult::Success)
+    {
+        return EvaluationResult;
+    }
+
+    if (State.Revision < 0 || State.Revision == MAX_int64)
+    {
+        SetSpatialContainerError(OutError,TEXT("容器 Revision 无法继续增加"));
+
+        return ENiumaWarehouseOperationResult::InternalError;
+    }
+
+    FNiumaSpatialContainerState CandidateState = State;
+
+    TArray<int32> CandidateOccupancy = OccupancyCache;
+
+    /*
+     * 先在候选缓存中释放原 Placement 的全部旧占用。
+     * 其他 Placement 的下标和占用保持不变。
+     */
+    for (int32& OccupyingPlacementIndex : CandidateOccupancy)
+    {
+        if (OccupyingPlacementIndex == INDEX_NONE)
+        {
+            continue;
+        }
+
+        if (!State.Placements.IsValidIndex(OccupyingPlacementIndex))
+        {
+            SetSpatialContainerError(OutError,TEXT("占用缓存包含无效的Placement 下标"));
+
+            return ENiumaWarehouseOperationResult::InternalError;
+        }
+
+        if (OccupyingPlacementIndex == PlacementIndex)
+        {
+            OccupyingPlacementIndex = INDEX_NONE;
+        }
+    }
+
+    /*
+     * 使用本次 EvaluatePlacement 输出的同一份
+     * ResolvedData 写入候选新占用。
+     */
+    for (const FIntPoint& LocalCell :
+        ResolvedData.Footprint.Cells)
+    {
+        const int64 WorldX =
+            static_cast<int64>(
+                CandidatePlacement.Origin.X) +
+            static_cast<int64>(LocalCell.X);
+
+        const int64 WorldY =
+            static_cast<int64>(
+                CandidatePlacement.Origin.Y) +
+            static_cast<int64>(LocalCell.Y);
+
+        const FIntPoint WorldCell(
+            static_cast<int32>(WorldX),
+            static_cast<int32>(WorldY));
+
+        const int32 FlatIndex = ToFlatIndexUnchecked(WorldCell);
+
+        if (!CandidateOccupancy.IsValidIndex(FlatIndex))
+        {
+            SetSpatialContainerError(OutError,TEXT("候选占用缓存与容器配置不一致"));
+
+            return ENiumaWarehouseOperationResult::InternalError;
+        }
+
+        /*
+         * 自身旧占用已经释放；
+         * 如果这里仍非空，只可能是内部状态异常。
+         */
+        if (CandidateOccupancy[FlatIndex] !=INDEX_NONE)
+        {
+            SetSpatialContainerError(OutError,TEXT("候选占用缓存出现意外碰撞"));
+
+            return ENiumaWarehouseOperationResult::InternalError;
+        }
+
+        CandidateOccupancy[FlatIndex] = PlacementIndex;
+    }
+
+    CandidateState.Placements[PlacementIndex] = CandidatePlacement;
+
+    ++CandidateState.Revision;
+
+    FString CandidateStateError;
+
+    if (!CandidateState.IsStructurallyValid(&CandidateStateError))
+    {
+        if (OutError != nullptr)
+        {
+            *OutError = FString::Printf(
+                TEXT("候选容器状态无效：%s"),
+                *CandidateStateError);
+        }
+
+        return ENiumaWarehouseOperationResult::InternalError;
+    }
+
+    State = MoveTemp(CandidateState);
+    OccupancyCache = MoveTemp(CandidateOccupancy);
+
+    if (OutError != nullptr)
+    {
+        OutError->Reset();
+    }
+
+    return ENiumaWarehouseOperationResult::Success;
+}
+
+ENiumaWarehouseOperationResult FNiumaSpatialContainer::TryRotate(
+    const FGuid& InstanceId,
+    ENiumaItemOrientation NewOrientation,
+    const INiumaItemSpatialDefinitionResolver& Resolver,
+    FString* OutError)
+{
+    //业务逻辑
+    //TryRotate
+    //→ 找到 Placement
+    //→ 复制 Placement
+    //→ 只修改 Orientation
+    //→ TryReplacePlacementAt
+    //→ Resolver 返回新方向 Footprint
+    //→ 忽略自身旧占用进行碰撞检查
+    //→ 候选缓存释放旧形状
+    //→ 候选缓存写入旋转后形状
+    //→ Revision + 1
+    //→ 原子提交
+    if (!bInitialized)
+    {
+        SetSpatialContainerError(OutError,TEXT("空间容器尚未初始化"));
+
+        return ENiumaWarehouseOperationResult::NotInitialized;
+    }
+
+    if (!InstanceId.IsValid())
+    {
+        SetSpatialContainerError(OutError,TEXT("待旋转的 InstanceId 无效"));
+
+        return ENiumaWarehouseOperationResult::InvalidItem;
+    }
+
+    const int32 PlacementIndex = FindPlacementIndexByInstanceId(InstanceId);
+
+    if (PlacementIndex == INDEX_NONE)
+    {
+        SetSpatialContainerError(OutError, TEXT("容器中找不到待旋转的物品实例"));
+
+        return ENiumaWarehouseOperationResult::ItemNotFound;
+    }
+
+    const FNiumaSpatialItemPlacement& ExistingPlacement = State.Placements[PlacementIndex];
+
+    /*
+     * 方向没有变化时属于成功的无操作。
+     * 不调用 Resolver，也不增加 Revision。
+     */
+    if (ExistingPlacement.Orientation == NewOrientation)
+    {
+        if (OutError != nullptr)
+        {
+            OutError->Reset();
+        }
+
+        return ENiumaWarehouseOperationResult::Success;
+    }
+
+    FNiumaSpatialItemPlacement CandidatePlacement = ExistingPlacement;
+
+    CandidatePlacement.Orientation = NewOrientation;
+
+    return TryReplacePlacementAt(
+        PlacementIndex,
+        CandidatePlacement,
+        Resolver,
+        OutError);
 }
