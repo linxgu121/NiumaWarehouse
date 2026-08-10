@@ -1,0 +1,1 @@
+#include "NiumaWarehouse/Spatial/NiumaItemFootprint.h"
