@@ -4,8 +4,23 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 
 #include "NiumaWarehouse/Container/NiumaSpatialContainer.h"
+#include "NiumaWarehouse/Definitions/NiumaAssetManagerItemSpatialDefinitionResolver.h"
+#include "NiumaWarehouse/Item/NiumaItemInstance.h"
+#include "NiumaWarehouse/Result/NiumaWarehouseOperationResponse.h"
 
 #include "NiumaWarehouseSubsystem.generated.h"
+
+/**
+ * 仓库状态成功变化后的通知。
+ * 不携带完整仓库数组，监听者可根据 Revision
+ * 判断是否需要重新获取快照。
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+    FNiumaWarehouseChangedSignature,
+    int64,
+    NewRevision,
+    FNiumaWarehouseOperationResponse,
+    OperationResponse);
 
 UCLASS()
 class NIUMA_API UNiumaWarehouseSubsystem final : public UGameInstanceSubsystem
@@ -42,6 +57,25 @@ public:
     */
     const FNiumaSpatialContainerState& GetWarehouseState() const;
 
+    /**
+     * 自动寻找第一个合法位置并接收物品。
+     *
+     * 失败时仓库保持原样。
+     */
+    UFUNCTION(BlueprintCallable, Category = "Niuma|Warehouse")
+    FNiumaWarehouseOperationResponse TryReceiveItem(const FNiumaItemInstance& Item);
+
+    /**
+     * 只有仓库成功发生业务变化后才广播。
+     */
+    UPROPERTY(BlueprintAssignable,Category = "Niuma|Warehouse")
+    FNiumaWarehouseChangedSignature OnWarehouseChanged;
+
+    /**
+     * 结束 Subsystem 生命周期并清理订阅关系。
+     */
+    virtual void Deinitialize() override;
+
 private:
     /**
     * 从 Project Settings 加载默认仓库定义，
@@ -51,5 +85,11 @@ private:
 
     FNiumaSpatialContainer Warehouse;
 
+    /**
+     * 把 ItemDefinitionId 解析为真实空间数据。
+     */
+    FNiumaAssetManagerItemSpatialDefinitionResolver ItemDefinitionResolver;
+
     FString InitializationError;
+    
 };

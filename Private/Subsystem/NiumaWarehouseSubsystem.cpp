@@ -5,6 +5,7 @@
 
 #include "NiumaWarehouse/Definitions/NiumaWarehouseDefinition.h"
 #include "NiumaWarehouse/Settings/NiumaWarehouseSettings.h"
+#include "NiumaWarehouse/Spatial/NiumaSpatialItemPlacement.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogNiumaWarehouseSubsystem,Log,All);
 
@@ -46,6 +47,13 @@ void UNiumaWarehouseSubsystem::Initialize(FSubsystemCollectionBase& Collection)
         TEXT("默认仓库初始化成功：%d x %d"),
         Config.Width,
         Config.Height);
+}
+
+void UNiumaWarehouseSubsystem::Deinitialize()
+{
+    OnWarehouseChanged.Clear();
+
+    Super::Deinitialize();
 }
 
 bool UNiumaWarehouseSubsystem::TryInitializeDefaultWarehouse(FString* OutError)
@@ -130,6 +138,63 @@ bool UNiumaWarehouseSubsystem::TryInitializeDefaultWarehouse(FString* OutError)
     }
 
     return true;
+}
+
+FNiumaWarehouseOperationResponse UNiumaWarehouseSubsystem::TryReceiveItem(
+    const FNiumaItemInstance& Item)
+{
+    FNiumaSpatialItemPlacement Placement;
+    FString Error;
+
+    const ENiumaWarehouseOperationResult
+        FindResult = Warehouse.FindFirstValidPlacement(
+            Item,
+            ItemDefinitionResolver,
+            Placement,
+            &Error);
+
+    if (FindResult != ENiumaWarehouseOperationResult::Success)
+    {
+        return FNiumaWarehouseOperationResponse::MakeFailure(
+                FindResult,
+                Error);
+    }
+
+    /*
+    * 提交前先验证能否构造成功响应，
+    * 避免仓库已经修改后才发现响应数据异常。
+    */
+    const FNiumaWarehouseOperationResponse SuccessResponse =
+        FNiumaWarehouseOperationResponse::MakeSuccess(Placement);
+
+    if (!SuccessResponse.IsSuccess())
+    {
+        return SuccessResponse;
+    }
+
+    Error.Reset();
+
+    const ENiumaWarehouseOperationResult
+        PlaceResult = Warehouse.TryPlace(
+            Placement,
+            ItemDefinitionResolver,
+            &Error);
+
+    if (PlaceResult != ENiumaWarehouseOperationResult::Success)
+    {
+        return FNiumaWarehouseOperationResponse::MakeFailure(
+                PlaceResult,
+                Error);
+    }
+
+    /*
+     * 此时 Placement、Occupancy 和 Revision
+     * 已经全部成功提交。
+     */
+    OnWarehouseChanged.Broadcast(Warehouse.GetState().Revision,SuccessResponse);
+
+    return SuccessResponse;
+
 }
 
 bool UNiumaWarehouseSubsystem::IsWarehouseInitialized() const
