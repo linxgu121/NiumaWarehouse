@@ -132,6 +132,18 @@ public:
     ENiumaWarehouseOperationResult TryRemove(const FGuid& InstanceId,FString* OutError = nullptr);
 
     /**
+    * 判断指定物品能否重定位到目标位置和方向。
+    * 只进行查询，不修改容器状态；
+    * 碰撞检测会忽略该物品自己的旧占用。
+    */
+    ENiumaWarehouseOperationResult CanRelocate(
+        const FGuid& InstanceId,
+        FIntPoint NewOrigin,
+        ENiumaItemOrientation NewOrientation,
+        const INiumaItemSpatialDefinitionResolver& Resolver,
+        FString* OutError = nullptr) const;
+
+    /**
      * 同时修改指定物品的位置与方向。
      *
      * 位置和方向作为同一个事务提交；
@@ -155,6 +167,7 @@ public:
         FIntPoint NewOrigin,
         const INiumaItemSpatialDefinitionResolver& Resolver,
         FString* OutError = nullptr);
+
 
     /**
      * 把指定物品实例旋转到目标方向。

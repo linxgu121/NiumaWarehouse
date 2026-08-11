@@ -234,6 +234,19 @@ ENiumaWarehouseOperationResult UNiumaWarehouseSubsystem::FindItem(
         nullptr);
 }
 
+ENiumaWarehouseOperationResult UNiumaWarehouseSubsystem::CanRelocateItem(
+    const FGuid& InstanceId,
+    FIntPoint NewOrigin,
+    ENiumaItemOrientation NewOrientation) const
+{
+    return Warehouse.CanRelocate(
+        InstanceId,
+        NewOrigin,
+        NewOrientation,
+        ItemDefinitionResolver,
+        nullptr);
+}
+
 FNiumaWarehouseOperationResponse UNiumaWarehouseSubsystem::TryRelocateItem(
     const FGuid& InstanceId,
     FIntPoint NewOrigin,
@@ -308,6 +321,54 @@ FNiumaWarehouseOperationResponse UNiumaWarehouseSubsystem::TryRelocateItem(
             RevisionAfter,
             SuccessResponse);
     }
+
+    return SuccessResponse;
+}
+
+FNiumaWarehouseOperationResponse UNiumaWarehouseSubsystem::TryRemoveItem(
+    const FGuid& InstanceId)
+{
+    /*
+     * 在提交移除前准备成功响应。
+     * 有效 ID 才能生成成功响应，但最终是否能够移除
+     * 仍由空间容器判断。
+     */
+    const FNiumaWarehouseOperationResponse SuccessResponse =
+        FNiumaWarehouseOperationResponse::MakeRemovalSuccess(
+            InstanceId);
+
+    FString Error;
+
+    const ENiumaWarehouseOperationResult RemoveResult =
+        Warehouse.TryRemove(
+            InstanceId,
+            &Error);
+
+    if (RemoveResult !=
+        ENiumaWarehouseOperationResult::Success)
+    {
+        return FNiumaWarehouseOperationResponse::MakeFailure(
+            RemoveResult,
+            Error);
+    }
+
+    /*
+     * 核心移除成功意味着 InstanceId 一定有效，
+     * 因此预先构造的移除成功响应也必须有效。
+     */
+    if (!SuccessResponse.IsSuccess())
+    {
+        return SuccessResponse;
+    }
+
+    /*
+     * TryRemove 没有成功无操作：
+     * 返回 Success 就代表 Placement 已移除，
+     * Occupancy 已释放且 Revision 已增加一次。
+     */
+    OnWarehouseChanged.Broadcast(
+        Warehouse.GetState().Revision,
+        SuccessResponse);
 
     return SuccessResponse;
 }

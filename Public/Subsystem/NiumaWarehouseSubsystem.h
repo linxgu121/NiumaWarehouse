@@ -90,8 +90,19 @@ public:
     FNiumaWarehouseOperationResponse TryReceiveItem(const FNiumaItemInstance& Item);
 
     /**
+    * 判断仓库物品能否移动到目标位置与方向。
+    *
+    * 只进行预览查询，不修改仓库状态，
+    * 不增加 Revision，也不广播变化事件。
+    */
+    UFUNCTION(BlueprintPure, Category = "Niuma|Warehouse")
+    ENiumaWarehouseOperationResult CanRelocateItem(
+        const FGuid& InstanceId,
+        FIntPoint NewOrigin,
+        ENiumaItemOrientation NewOrientation) const;
+
+    /**
      * 原子修改仓库物品的位置与方向。
-     *
      * 真实变化成功时广播一次；
      * 成功无操作时不广播。
      */
@@ -100,6 +111,17 @@ public:
         const FGuid& InstanceId,
         FIntPoint NewOrigin,
         ENiumaItemOrientation NewOrientation);
+
+    /**
+    * 根据 InstanceId 原子移除仓库物品。
+    *
+    * 成功时 Revision 增加一次并广播一次；
+    * 失败时仓库保持原样且不广播。
+    */
+    UFUNCTION(BlueprintCallable, Category = "Niuma|Warehouse")
+    FNiumaWarehouseOperationResponse TryRemoveItem(
+        const FGuid& InstanceId);
+
 
     /**
      * 只有仓库成功发生业务变化后才广播。

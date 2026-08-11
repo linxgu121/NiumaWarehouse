@@ -1011,6 +1011,79 @@ ENiumaWarehouseOperationResult FNiumaSpatialContainer::TryRemove(
     return ENiumaWarehouseOperationResult::Success;
 }
 
+ENiumaWarehouseOperationResult FNiumaSpatialContainer::CanRelocate(
+    const FGuid& InstanceId,
+    FIntPoint NewOrigin,
+    ENiumaItemOrientation NewOrientation,
+    const INiumaItemSpatialDefinitionResolver& Resolver,
+    FString* OutError) const
+{
+    if (!bInitialized)
+    {
+        SetSpatialContainerError(
+            OutError,
+            TEXT("空间容器尚未初始化"));
+
+        return ENiumaWarehouseOperationResult::NotInitialized;
+    }
+
+    if (!InstanceId.IsValid())
+    {
+        SetSpatialContainerError(
+            OutError,
+            TEXT("待预览重定位的 InstanceId 无效"));
+
+        return ENiumaWarehouseOperationResult::InvalidItem;
+    }
+
+    const int32 PlacementIndex = FindPlacementIndexByInstanceId(InstanceId);
+
+    if (PlacementIndex == INDEX_NONE)
+    {
+        SetSpatialContainerError(
+            OutError,
+            TEXT("容器中找不到待预览重定位的物品实例"));
+
+        return ENiumaWarehouseOperationResult::ItemNotFound;
+    }
+
+    if (!State.Placements.IsValidIndex(PlacementIndex))
+    {
+        SetSpatialContainerError(
+            OutError,
+            TEXT("待预览重定位的 Placement 下标无效"));
+
+        return ENiumaWarehouseOperationResult::InternalError;
+    }
+
+    const FNiumaSpatialItemPlacement& ExistingPlacement =
+        State.Placements[PlacementIndex];
+
+    // 预览当前位置属于成功的无操作。
+    if (ExistingPlacement.Origin == NewOrigin &&
+        ExistingPlacement.Orientation == NewOrientation)
+    {
+        if (OutError != nullptr)
+        {
+            OutError->Reset();
+        }
+
+        return ENiumaWarehouseOperationResult::Success;
+    }
+
+    FNiumaSpatialItemPlacement CandidatePlacement = ExistingPlacement;
+
+    CandidatePlacement.Origin = NewOrigin;
+    CandidatePlacement.Orientation = NewOrientation;
+
+    return EvaluatePlacement(
+        CandidatePlacement,
+        Resolver,
+        PlacementIndex,
+        nullptr,
+        OutError);
+}
+
 ENiumaWarehouseOperationResult FNiumaSpatialContainer::TryRelocate(
     const FGuid& InstanceId,
     FIntPoint NewOrigin,
