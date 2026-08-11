@@ -32,6 +32,19 @@ public:
     bool TryInitializeEmpty(const FNiumaSpatialContainerConfig& InConfig, FString* OutError = nullptr);
 
     /**
+     * 使用持久化 State 初始化容器并重建占用缓存。
+     * 每条 Placement 都会重新经过定义解析、类型、
+     * 旋转、边界和碰撞检查。
+     * 只有全部 Placement 重建成功后才提交正式容器；
+     * 失败时当前容器保持原样。
+    */
+    bool TryInitializeFromState(
+        const FNiumaSpatialContainerConfig& InConfig,
+        const FNiumaSpatialContainerState& InState,
+        const INiumaItemSpatialDefinitionResolver& Resolver,
+        FString* OutError = nullptr);
+
+    /**
      * 当前容器是否已经成功初始化。
      */
     bool IsInitialized() const;
@@ -67,6 +80,20 @@ public:
     ENiumaWarehouseOperationResult CanPlace(
         const FNiumaSpatialItemPlacement& Placement,
         const INiumaItemSpatialDefinitionResolver& Resolver,
+        FString* OutError = nullptr) const;
+
+    /**
+    * 按确定性顺序寻找物品的第一个合法放置位置。
+    * 搜索顺序：
+    * Y 从上到下，X 从左到右，
+    * 方向依次为 0、90、180、270 度。
+    * 本函数只查询，不修改容器状态。
+    * 失败时不修改 OutPlacement。
+    */
+    ENiumaWarehouseOperationResult FindFirstValidPlacement(
+        const FNiumaItemInstance& Item,
+        const INiumaItemSpatialDefinitionResolver& Resolver,
+        FNiumaSpatialItemPlacement& OutPlacement,
         FString* OutError = nullptr) const;
 
     /**
@@ -107,7 +134,6 @@ public:
 
     /**
      * 把指定物品实例旋转到目标方向。
-     *
      * Origin 和物品实例数据保持不变。
      * 成功修改方向时 Revision 增加一次。
      * 失败时保持原方向和原占用。
@@ -185,4 +211,20 @@ private:
         const FNiumaSpatialItemPlacement& CandidatePlacement,
         const INiumaItemSpatialDefinitionResolver& Resolver,
         FString* OutError);
+
+    /**
+    * 使用已经解析完成的空间数据检查 Placement。
+    * 调用前必须已经验证：
+    * - 容器已初始化；
+    * - Placement 和 Item 结构合法；
+    * - IgnoredPlacementIndex 合法或为 INDEX_NONE。
+    * 本函数负责验证解析数据、类型、旋转许可、
+    * 边界和碰撞检查。
+    */
+    ENiumaWarehouseOperationResult
+        EvaluateResolvedPlacement(
+            const FNiumaSpatialItemPlacement& Placement,
+            const FNiumaResolvedItemSpatialData& ResolvedData,
+            int32 IgnoredPlacementIndex,
+            FString* OutError) const;
 };
