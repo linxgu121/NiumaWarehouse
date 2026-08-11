@@ -9,6 +9,8 @@
 #include "NiumaWarehouse/Item/NiumaItemInstance.h"
 #include "NiumaWarehouse/Result/NiumaWarehouseOperationResponse.h"
 #include "NiumaWarehouse/Container/NiumaSpatialContainerState.h"
+#include "NiumaWarehouse/Result/NiumaWarehouseOperationResult.h"
+#include "NiumaWarehouse/Spatial/NiumaSpatialItemPlacement.h"
 
 #include "NiumaWarehouseSubsystem.generated.h"
 
@@ -68,12 +70,35 @@ public:
     FNiumaSpatialContainerState GetWarehouseSnapshot() const;
 
     /**
+    * 根据 InstanceId 查询仓库中的物品 Placement。
+    *
+    * 成功时写入 OutPlacement；
+    * 失败时保持 OutPlacement 原样。
+    */
+    UFUNCTION(BlueprintPure, Category = "Niuma|Warehouse")
+    ENiumaWarehouseOperationResult FindItem(
+        const FGuid& InstanceId,
+        FNiumaSpatialItemPlacement& OutPlacement) const;
+
+    /**
      * 自动寻找第一个合法位置并接收物品。
      *
      * 失败时仓库保持原样。
      */
     UFUNCTION(BlueprintCallable, Category = "Niuma|Warehouse")
     FNiumaWarehouseOperationResponse TryReceiveItem(const FNiumaItemInstance& Item);
+
+    /**
+     * 原子修改仓库物品的位置与方向。
+     *
+     * 真实变化成功时广播一次；
+     * 成功无操作时不广播。
+     */
+    UFUNCTION(BlueprintCallable, Category = "Niuma|Warehouse")
+    FNiumaWarehouseOperationResponse TryRelocateItem(
+        const FGuid& InstanceId,
+        FIntPoint NewOrigin,
+        ENiumaItemOrientation NewOrientation);
 
     /**
      * 只有仓库成功发生业务变化后才广播。

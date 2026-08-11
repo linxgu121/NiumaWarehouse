@@ -223,3 +223,91 @@ FNiumaSpatialContainerState UNiumaWarehouseSubsystem::GetWarehouseSnapshot() con
 {
     return Warehouse.GetState();
 }
+
+ENiumaWarehouseOperationResult UNiumaWarehouseSubsystem::FindItem(
+    const FGuid& InstanceId,
+    FNiumaSpatialItemPlacement& OutPlacement) const
+{
+    return Warehouse.TryFindPlacement(
+        InstanceId,
+        OutPlacement,
+        nullptr);
+}
+
+FNiumaWarehouseOperationResponse UNiumaWarehouseSubsystem::TryRelocateItem(
+    const FGuid& InstanceId,
+    FIntPoint NewOrigin,
+    ENiumaItemOrientation NewOrientation)
+{
+    FString Error;
+
+    FNiumaSpatialItemPlacement ExistingPlacement;
+
+    const ENiumaWarehouseOperationResult FindResult = Warehouse.TryFindPlacement(
+            InstanceId,
+            ExistingPlacement,
+            &Error);
+
+    if (FindResult != ENiumaWarehouseOperationResult::Success)
+    {
+        return FNiumaWarehouseOperationResponse::MakeFailure(
+            FindResult,
+            Error);
+    }
+
+    FNiumaSpatialItemPlacement CandidatePlacement = ExistingPlacement;
+
+    CandidatePlacement.Origin = NewOrigin;
+    CandidatePlacement.Orientation = NewOrientation;
+
+    /*
+     * 提前准备成功响应。
+     * 只有核心事务成功后才会真正返回或广播它。
+     */
+    const FNiumaWarehouseOperationResponse SuccessResponse =
+        FNiumaWarehouseOperationResponse::MakeSuccess(
+            CandidatePlacement);
+
+    const int64 RevisionBefore = Warehouse.GetState().Revision;
+
+    Error.Reset();
+
+    const ENiumaWarehouseOperationResult RelocateResult =
+        Warehouse.TryRelocate(
+            InstanceId,
+            NewOrigin,
+            NewOrientation,
+            ItemDefinitionResolver,
+            &Error);
+
+    if (RelocateResult != ENiumaWarehouseOperationResult::Success)
+    {
+        return FNiumaWarehouseOperationResponse::MakeFailure(
+            RelocateResult,
+            Error);
+    }
+
+    /*
+     * 如果核心报告成功，候选 Placement 必须能够生成
+     * 合法成功响应；否则说明内部契约已经不一致。
+     */
+    if (!SuccessResponse.IsSuccess())
+    {
+        return SuccessResponse;
+    }
+
+    const int64 RevisionAfter = Warehouse.GetState().Revision;
+
+    /*
+     * Revision 未变化表示目标与原 Placement 完全相同，
+     * 属于成功无操作，不应通知 UI 刷新。
+     */
+    if (RevisionAfter != RevisionBefore)
+    {
+        OnWarehouseChanged.Broadcast(
+            RevisionAfter,
+            SuccessResponse);
+    }
+
+    return SuccessResponse;
+}

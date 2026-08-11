@@ -132,6 +132,19 @@ public:
     ENiumaWarehouseOperationResult TryRemove(const FGuid& InstanceId,FString* OutError = nullptr);
 
     /**
+     * 同时修改指定物品的位置与方向。
+     *
+     * 位置和方向作为同一个事务提交；
+     * 任一检查失败时容器保持原样。
+     */
+    ENiumaWarehouseOperationResult TryRelocate(
+        const FGuid& InstanceId,
+        FIntPoint NewOrigin,
+        ENiumaItemOrientation NewOrientation,
+        const INiumaItemSpatialDefinitionResolver& Resolver,
+        FString* OutError = nullptr);
+
+    /**
     * 把指定物品实例移动到新的二维原点。
     * 方向和物品数据保持不变。
     * 成功修改位置时 Revision 增加一次。

@@ -391,7 +391,7 @@ ENiumaWarehouseOperationResult FNiumaSpatialContainer::EvaluatePlacement(
             IgnoredPlacementIndex,
             OutError);
 
-    if (ResolvedResult !=                   ENiumaWarehouseOperationResult::Success)
+    if (ResolvedResult != ENiumaWarehouseOperationResult::Success)
     {
         return ResolvedResult;
     }
@@ -1009,6 +1009,77 @@ ENiumaWarehouseOperationResult FNiumaSpatialContainer::TryRemove(
     }
 
     return ENiumaWarehouseOperationResult::Success;
+}
+
+ENiumaWarehouseOperationResult FNiumaSpatialContainer::TryRelocate(
+    const FGuid& InstanceId,
+    FIntPoint NewOrigin,
+    ENiumaItemOrientation NewOrientation,
+    const INiumaItemSpatialDefinitionResolver& Resolver,
+    FString* OutError)
+{
+    if (!bInitialized)
+    {
+        SetSpatialContainerError(OutError,TEXT("空间容器尚未初始化"));
+
+        return ENiumaWarehouseOperationResult::NotInitialized;
+    }
+
+    if (!InstanceId.IsValid())
+    {
+        SetSpatialContainerError(OutError,TEXT("待重定位的 InstanceId 无效"));
+
+        return ENiumaWarehouseOperationResult::InvalidItem;
+    }
+
+    const int32 PlacementIndex = FindPlacementIndexByInstanceId(InstanceId);
+
+    if (PlacementIndex == INDEX_NONE)
+    {
+        SetSpatialContainerError(
+            OutError,
+            TEXT("容器中找不到待重定位的物品实例"));
+
+        return ENiumaWarehouseOperationResult::ItemNotFound;
+    }
+
+    if (!State.Placements.IsValidIndex(PlacementIndex))
+    {
+        SetSpatialContainerError(
+            OutError,
+            TEXT("待重定位的 Placement 下标无效"));
+
+        return ENiumaWarehouseOperationResult::InternalError;
+    }
+
+    const FNiumaSpatialItemPlacement& ExistingPlacement =
+        State.Placements[PlacementIndex];
+
+    /*
+     * 位置与方向均未变化时属于成功无操作。
+     * 不解析物品定义，也不增加 Revision。
+     */
+    if (ExistingPlacement.Origin == NewOrigin &&
+        ExistingPlacement.Orientation == NewOrientation)
+    {
+        if (OutError != nullptr)
+        {
+            OutError->Reset();
+        }
+
+        return ENiumaWarehouseOperationResult::Success;
+    }
+
+    FNiumaSpatialItemPlacement CandidatePlacement = ExistingPlacement;
+
+    CandidatePlacement.Origin = NewOrigin;
+    CandidatePlacement.Orientation = NewOrientation;
+
+    return TryReplacePlacementAt(
+        PlacementIndex,
+        CandidatePlacement,
+        Resolver,
+        OutError);
 }
 
 ENiumaWarehouseOperationResult FNiumaSpatialContainer::TryMove(
