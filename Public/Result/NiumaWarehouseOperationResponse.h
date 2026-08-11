@@ -11,7 +11,6 @@
 
 struct FNiumaSpatialItemPlacement;
 
-
 /**
  * 仓库业务操作的结构化响应。
  */
@@ -27,6 +26,13 @@ public:
     */
     static FNiumaWarehouseOperationResponse MakeSuccess(
         const FNiumaSpatialItemPlacement& Placement);
+
+    /**
+    * 创建移除成功响应。
+    * InstanceId 有效，但不存在最终 Placement。
+    */
+    static FNiumaWarehouseOperationResponse MakeRemovalSuccess(
+        const FGuid& InInstanceId);
 
     /**
      * 创建失败响应。
@@ -51,13 +57,25 @@ public:
     FGuid InstanceId;
 
     /**
-     * 成功放置后的最终二维原点。
+     * FinalOrigin 和 FinalOrientation 是否具有业务意义。
+    *
+    * 放置、接收和重定位成功时为 true；
+    * 移除成功与所有失败响应为 false。
+    */
+    UPROPERTY(BlueprintReadOnly, Category = "Niuma|Warehouse|Response")
+    bool bHasFinalPlacement = false;
+
+    /**
+     * 成功操作后的最终二维原点。
+     * 只有 bHasFinalPlacement 为 true 时才有效。
      */
     UPROPERTY(BlueprintReadOnly,Category = "Niuma|Warehouse|Response")
     FIntPoint FinalOrigin = FIntPoint::ZeroValue;
 
+
     /**
-     * 成功放置后的最终方向。
+     * 成功操作后的最终方向。
+     * 只有 bHasFinalPlacement 为 true 时才有效
      */
     UPROPERTY(BlueprintReadOnly,Category = "Niuma|Warehouse|Response")
     ENiumaItemOrientation FinalOrientation = ENiumaItemOrientation::Degree0;

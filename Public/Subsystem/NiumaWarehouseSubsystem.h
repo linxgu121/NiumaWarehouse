@@ -11,6 +11,7 @@
 #include "NiumaWarehouse/Container/NiumaSpatialContainerState.h"
 #include "NiumaWarehouse/Result/NiumaWarehouseOperationResult.h"
 #include "NiumaWarehouse/Spatial/NiumaSpatialItemPlacement.h"
+#include "NiumaWarehouse/Type/NiumaItemOrientation.h"
 
 #include "NiumaWarehouseSubsystem.generated.h"
 
