@@ -197,6 +197,8 @@ FNiumaWarehouseOperationResponse UNiumaWarehouseSubsystem::TryReceiveItem(
 
 }
 
+
+
 bool UNiumaWarehouseSubsystem::IsWarehouseInitialized() const
 {
     return Warehouse.IsInitialized();
@@ -213,6 +215,11 @@ const FNiumaSpatialContainerConfig& UNiumaWarehouseSubsystem::GetWarehouseConfig
 }
 
 const FNiumaSpatialContainerState& UNiumaWarehouseSubsystem::GetWarehouseState() const
+{
+    return Warehouse.GetState();
+}
+
+FNiumaSpatialContainerState UNiumaWarehouseSubsystem::GetWarehouseSnapshot() const
 {
     return Warehouse.GetState();
 }

@@ -97,6 +97,17 @@ public:
         FString* OutError = nullptr) const;
 
     /**
+    * 根据 InstanceId 查询对应 Placement。
+    *
+    * 成功时才修改 OutPlacement；
+    * 任意失败都保持 OutPlacement 原样。
+    */
+    ENiumaWarehouseOperationResult TryFindPlacement(
+        const FGuid& InstanceId,
+        FNiumaSpatialItemPlacement& OutPlacement,
+        FString* OutError = nullptr) const;
+
+    /**
     * 把一条合法 Placement 原子提交到容器。
     * 成功时：
     * - Placements 增加一条记录

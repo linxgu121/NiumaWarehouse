@@ -735,6 +735,62 @@ ENiumaWarehouseOperationResult FNiumaSpatialContainer::FindFirstValidPlacement(
     return ENiumaWarehouseOperationResult::NoValidPlacement;
 }
 
+ENiumaWarehouseOperationResult FNiumaSpatialContainer::TryFindPlacement(
+    const FGuid& InstanceId,
+    FNiumaSpatialItemPlacement& OutPlacement,
+    FString* OutError) const
+{
+    if (!bInitialized)
+    {
+        SetSpatialContainerError(OutError,TEXT("空间容器尚未初始化"));
+
+        return ENiumaWarehouseOperationResult::NotInitialized;
+    }
+
+    if (!InstanceId.IsValid())
+    {
+        SetSpatialContainerError(OutError,TEXT("待查询的 InstanceId 无效"));
+
+        return ENiumaWarehouseOperationResult::InvalidItem;
+    }
+
+    const int32 PlacementIndex = FindPlacementIndexByInstanceId(InstanceId);
+
+    if (PlacementIndex == INDEX_NONE)
+    {
+        SetSpatialContainerError(OutError,TEXT("容器中找不到指定物品实例"));
+
+        return ENiumaWarehouseOperationResult::ItemNotFound;
+    }
+
+    if (!State.Placements.IsValidIndex(PlacementIndex))
+    {
+        SetSpatialContainerError(OutError,TEXT("物品查询下标与容器状态不一致"));
+
+        return ENiumaWarehouseOperationResult::InternalError;
+    }
+
+    const FNiumaSpatialItemPlacement& FoundPlacement =
+        State.Placements[PlacementIndex];
+
+    if (!FoundPlacement.IsValid(nullptr))
+    {
+        SetSpatialContainerError(OutError,TEXT("容器中的放置记录结构无效"));
+
+        return ENiumaWarehouseOperationResult::InternalError;
+    }
+
+    // 所有检查通过后才提交输出，保证失败原子性。
+    OutPlacement = FoundPlacement;
+
+    if (OutError != nullptr)
+    {
+        OutError->Reset();
+    }
+
+    return ENiumaWarehouseOperationResult::Success;
+}
+
 ENiumaWarehouseOperationResult FNiumaSpatialContainer::TryPlace(
     const FNiumaSpatialItemPlacement& Placement,
     const INiumaItemSpatialDefinitionResolver& Resolver,

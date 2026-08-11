@@ -3,10 +3,12 @@
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 
+
 #include "NiumaWarehouse/Container/NiumaSpatialContainer.h"
 #include "NiumaWarehouse/Definitions/NiumaAssetManagerItemSpatialDefinitionResolver.h"
 #include "NiumaWarehouse/Item/NiumaItemInstance.h"
 #include "NiumaWarehouse/Result/NiumaWarehouseOperationResponse.h"
+#include "NiumaWarehouse/Container/NiumaSpatialContainerState.h"
 
 #include "NiumaWarehouseSubsystem.generated.h"
 
@@ -56,6 +58,14 @@ public:
     * 获取仓库状态
     */
     const FNiumaSpatialContainerState& GetWarehouseState() const;
+
+    /**
+    * 获取当前仓库状态的独立副本。
+    *
+    * 调用者修改返回值不会影响仓库内部状态。
+    */
+    UFUNCTION(BlueprintPure, Category = "Niuma|Warehouse")
+    FNiumaSpatialContainerState GetWarehouseSnapshot() const;
 
     /**
      * 自动寻找第一个合法位置并接收物品。
