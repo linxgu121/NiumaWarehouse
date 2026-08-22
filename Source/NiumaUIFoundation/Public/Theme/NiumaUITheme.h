@@ -83,6 +83,13 @@ struct NIUMAUIFOUNDATION_API FNiumaUIColorTokens
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Niuma|UI|Color")
     FLinearColor ButtonDisabled =
         FLinearColor(0.10f, 0.11f, 0.13f, 0.55f);
+
+    /**
+    * 玻璃面板的边框颜色。
+    */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Niuma|UI|Color")
+    FLinearColor GlassPanelBorder =
+        FLinearColor(0.0f, 0.78f, 1.0f, 0.28f);
 };
 
 /**
@@ -167,6 +174,7 @@ struct NIUMAUIFOUNDATION_API FNiumaUIShapeTokens
     */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Niuma|UI|Effect", meta = (ClampMin = "0.0", UIMin = "0.0"))
     float GlassBlurStrength = 12.0f;
+
 };
 
 /**
@@ -193,6 +201,8 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Niuma|UI|Tokens")
     FNiumaUIShapeTokens Shape;
+
+
 };
 
 
