@@ -1,12 +1,12 @@
 # Unreal Engine generated files
-Binaries/
-DerivedDataCache/
-Intermediate/
-Saved/
+/Binaries/
+/DerivedDataCache/
+/Intermediate/
+/Saved/
 
 # IDE-generated files
-.vs/
-.vscode/
+/.vs/
+/.vscode/
 *.sln
 *.slnx
 *.VC.db
@@ -14,3 +14,14 @@ Saved/
 *.sdf
 *.suo
 *.user
+*.vsconfig
+*.code-workspace
+/.ignore
+
+# This public repository contains the C++ demo source only
+/Config/
+/Content/
+/Plugins/
+
+# Local tests are intentionally not published
+/Source/Niuma/Private/Test/
