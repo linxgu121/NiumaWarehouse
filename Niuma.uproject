@@ -8,6 +8,11 @@
 			"Name": "Niuma",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+		    "Name": "NiumaUIFoundation",
+		    "Type": "Runtime",
+		    "LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [

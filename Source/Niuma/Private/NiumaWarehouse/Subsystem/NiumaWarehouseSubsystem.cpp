@@ -14,6 +14,7 @@
 #include "NiumaWarehouse/Remote/NiumaWarehouseSnapshotApplier.h"
 #include "NiumaNetwork/Session/NiumaAccountSessionState.h"
 #include "NiumaNetwork/Result/NiumaRemoteOutcome.h"
+#include "NiumaWarehouse/Remote/NiumaWarehouseGrantDtos.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogNiumaWarehouseSubsystem,Log,All);
 
@@ -222,11 +223,31 @@ bool UNiumaWarehouseSubsystem::TryInitializeDefaultWarehouse(FString* OutError)
     return true;
 }
 
+uint64 UNiumaWarehouseSubsystem::BeginRemoteRequest(
+    FString PlayerUid,
+    ENiumaWarehouseRemoteState PendingState)
+{
+    check(IsInGameThread());
+    check(!bRemoteRequestPending);
+    check(!PlayerUid.IsEmpty());
+
+    ++RemoteRequestGeneration;
+
+    bRemoteRequestPending = true;
+
+    RemoteWarehousePlayerUid = PlayerUid;
+    ActiveRemoteRequestPlayerUid = MoveTemp(PlayerUid);
+
+    SetRemoteStateInternal(PendingState);
+
+    return RemoteRequestGeneration;
+}
+
 void UNiumaWarehouseSubsystem::RecoverAuthoritativeSnapshotAfterWriteFailure(
     ERemoteRequestKind RequestKind,
     const FString& FailureMessage)
 {
-    if (RequestKind != ERemoteRequestKind::Relocate)
+    if (RequestKind != ERemoteRequestKind::Write)
     {
         return;
     }
@@ -306,16 +327,10 @@ bool UNiumaWarehouseSubsystem::RequestLoadWarehouse(
         return false;
     }
 
-    ++RemoteRequestGeneration;
 
-    const uint64 RequestGeneration = RemoteRequestGeneration;
-
-    bRemoteRequestPending = true;
-
-    RemoteWarehousePlayerUid = PlayerUid;
-    ActiveRemoteRequestPlayerUid = MoveTemp(PlayerUid);
-
-    SetRemoteStateInternal(ENiumaWarehouseRemoteState::Loading);
+    const uint64 RequestGeneration = BeginRemoteRequest(
+            MoveTemp(PlayerUid),
+            ENiumaWarehouseRemoteState::Loading);
 
     FNiumaWarehouseHttpGateway::RequestSnapshot(
         Session,
@@ -438,7 +453,7 @@ void UNiumaWarehouseSubsystem::HandleSnapshotRequestCompleted(
             ErrorMessage);
 
         const bool bRequiresAuthoritativeReload =
-            RequestKind == ERemoteRequestKind::Relocate &&
+            RequestKind == ERemoteRequestKind::Write &&
             (
                 bRevisionConflict ||
                 Result.GetOutcome() ==
@@ -551,8 +566,7 @@ bool UNiumaWarehouseSubsystem::RequestRelocateItem(
             ExistingPlacement,
             &PreviewError);
 
-    if (FindResult !=
-        ENiumaWarehouseOperationResult::Success)
+    if (FindResult != ENiumaWarehouseOperationResult::Success)
     {
         OutError = MoveTemp(PreviewError);
         return false;
@@ -592,8 +606,7 @@ bool UNiumaWarehouseSubsystem::RequestRelocateItem(
         return false;
     }
 
-    const int32 OrientationDegrees =
-        ToOrientationDegrees(NewOrientation);
+    const int32 OrientationDegrees = ToOrientationDegrees(NewOrientation);
 
     if (OrientationDegrees < 0)
     {
@@ -603,8 +616,7 @@ bool UNiumaWarehouseSubsystem::RequestRelocateItem(
 
     FNiumaWarehouseRelocateRequestDto RequestDto;
 
-    RequestDto.InstanceId =
-        InstanceId.ToString(
+    RequestDto.InstanceId = InstanceId.ToString(
             EGuidFormats::DigitsWithHyphensLower);
 
     RequestDto.OriginX = NewOrigin.X;
@@ -617,23 +629,13 @@ bool UNiumaWarehouseSubsystem::RequestRelocateItem(
      * 乐观并发的期望值，
      * 服务端只在版本一致时接受命令。
      */
-    RequestDto.ExpectedRevision =
-        Warehouse.GetState().Revision;
+    RequestDto.ExpectedRevision = Warehouse.GetState().Revision;
 
     FString PlayerUid = Session->GetPlayerUid();
 
-    ++RemoteRequestGeneration;
-
-    const uint64 RequestGeneration =
-        RemoteRequestGeneration;
-
-    bRemoteRequestPending = true;
-
-    RemoteWarehousePlayerUid = PlayerUid;
-    ActiveRemoteRequestPlayerUid = MoveTemp(PlayerUid);
-
-    SetRemoteStateInternal(
-        ENiumaWarehouseRemoteState::Writing);
+    const uint64 RequestGeneration = BeginRemoteRequest(
+            MoveTemp(PlayerUid),
+            ENiumaWarehouseRemoteState::Writing);
 
     FNiumaWarehouseHttpGateway::RequestRelocate(
         Session,
@@ -645,7 +647,7 @@ bool UNiumaWarehouseSubsystem::RequestRelocateItem(
             {
                 HandleSnapshotRequestCompleted(
                     RequestGeneration,
-                    ERemoteRequestKind::Relocate,
+                    ERemoteRequestKind::Write,
                     Result);
             }));
 
@@ -913,6 +915,101 @@ FNiumaWarehouseOperationResponse UNiumaWarehouseSubsystem::TryRemoveItem(
     return SuccessResponse;
 }
 
+#if !UE_BUILD_SHIPPING
+
+bool UNiumaWarehouseSubsystem::RequestGrantItemForDevelopment(
+    const FString& ItemDefinitionId,
+    int32 Count,
+    FString& OutError)
+{
+    OutError.Reset();
+
+    if (!IsInGameThread())
+    {
+        OutError = TEXT("开发物品发放请求必须从游戏线程发起");
+        return false;
+    }
+
+    if (bRemoteRequestPending)
+    {
+        OutError =
+            RemoteState == ENiumaWarehouseRemoteState::Writing
+            ? TEXT("仓库修改正在提交")
+            : TEXT("仓库快照正在加载");
+
+        return false;
+    }
+
+    // 发放属于远端写操作，必须先有当前账号的权威镜像。
+    if (!IsRemoteWarehouseReady())
+    {
+        OutError = TEXT("远端仓库尚未就绪");
+        return false;
+    }
+
+    UNiumaAccountSessionSubsystem* Session =
+        AccountSession.Get();
+
+    if (!IsValid(Session))
+    {
+        OutError = TEXT("当前账号会话已失效");
+        return false;
+    }
+
+    FString NormalizedItemDefinitionId =
+        ItemDefinitionId.TrimStartAndEnd();
+
+    if (NormalizedItemDefinitionId.IsEmpty())
+    {
+        OutError = TEXT("发放物品定义 ID 不能为空");
+        return false;
+    }
+
+    if (NormalizedItemDefinitionId.Len() > 128)
+    {
+        OutError =
+            TEXT("发放物品定义 ID 不能超过 128 个字符");
+        return false;
+    }
+
+    if (Count <= 0)
+    {
+        OutError = TEXT("发放数量必须大于 0");
+        return false;
+    }
+
+    FNiumaWarehouseGrantRequestDto RequestDto;
+    RequestDto.ItemDefinitionId =
+        MoveTemp(NormalizedItemDefinitionId);
+    RequestDto.Count = Count;
+
+    FString PlayerUid = Session->GetPlayerUid();
+
+    const uint64 RequestGeneration =
+        BeginRemoteRequest(
+            MoveTemp(PlayerUid),
+            ENiumaWarehouseRemoteState::Writing);
+
+    FNiumaWarehouseHttpGateway::
+        RequestGrantItemForDevelopment(
+            Session,
+            RequestDto,
+            FNiumaWarehouseSnapshotCompleted::CreateWeakLambda(
+                this,
+                [this, RequestGeneration](
+                    const FNiumaWarehouseSnapshotResult& Result)
+                {
+                    HandleSnapshotRequestCompleted(
+                        RequestGeneration,
+                        ERemoteRequestKind::Write,
+                        Result);
+                }));
+
+    return true;
+}
+
+#endif
+
 void UNiumaWarehouseSubsystem::SetRemoteStateInternal(
     ENiumaWarehouseRemoteState NewState,
     FString ErrorMessage)
@@ -1015,8 +1112,7 @@ void UNiumaWarehouseSubsystem::HandleAccountSessionChanged()
         return;
     }
 
-    if (SessionState ==
-        ENiumaAccountSessionState::LoggedOut)
+    if (SessionState == ENiumaAccountSessionState::LoggedOut)
     {
         TryClearRemoteWarehouse();
         return;

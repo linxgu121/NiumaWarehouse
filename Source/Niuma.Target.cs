@@ -10,6 +10,11 @@ public class NiumaTarget : TargetRules
 		Type = TargetType.Game;
 		DefaultBuildSettings = BuildSettingsVersion.V7;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_8;
-		ExtraModuleNames.Add("Niuma");
-	}
+        ExtraModuleNames.AddRange(
+			new string[]
+			{
+				"Niuma",
+				"NiumaUIFoundation"
+			});
+    }
 }

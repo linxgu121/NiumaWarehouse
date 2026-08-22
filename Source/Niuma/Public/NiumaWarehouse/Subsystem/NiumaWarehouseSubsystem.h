@@ -95,6 +95,21 @@ public:
         ENiumaItemOrientation NewOrientation,
         FString& OutError);
 
+#if !UE_BUILD_SHIPPING
+    /**
+     * 请求开发后端给当前账号发放物品。
+     *
+     * 只用于本地开发和 UI 联调，不向蓝图公开。
+     * 返回 true 只表示请求已受理。
+     * 成功后使用服务端返回的完整权威快照替换本地镜像。
+     */
+    bool RequestGrantItemForDevelopment(
+        const FString& ItemDefinitionId,
+        int32 Count,
+        FString& OutError);
+
+#endif
+
     /**
      * 远端仓库生命周期状态发生变化。
      */
@@ -211,9 +226,16 @@ private:
     enum class ERemoteRequestKind : uint8
     {
         Load,
-        Relocate
+        Write
     };
 
+    /**
+    * 统一开始一次远端请求。
+    * 调用前必须已经完成线程、会话和 Pending 检查。
+    */
+    uint64 BeginRemoteRequest(
+        FString PlayerUid,
+        ENiumaWarehouseRemoteState PendingState);
 
     /**
     * 当前仓库镜像与服务端的同步状态。
